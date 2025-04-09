@@ -1,3 +1,6 @@
 # An LLM-Powered Chatbot MCP Client written in Python
 
-See the [Building MCP clients](https://modelcontextprotocol.io/tutorials/building-a-client) tutorial for more information.
+1. Create a `.env` file with the `GEMINI_API_KEY` env variable.
+2. Run `uv sync` in this directory.
+3. Run `yarn && yarn build` in `../weather-server-typescript`.
+4. Run `uv run client.py ../weather-server-typescript/build/index.js`.

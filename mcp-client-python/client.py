@@ -1,11 +1,13 @@
 import asyncio
-from typing import Optional
+import os
+from typing import List, Optional
 from contextlib import AsyncExitStack
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from anthropic import Anthropic
+from google import genai  # Update import to use google.genai
+from google.genai import types  # Import types for tool configuration
 from dotenv import load_dotenv
 
 load_dotenv()  # load environment variables from .env
@@ -15,7 +17,7 @@ class MCPClient:
         # Initialize session and client objects
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
-        self.anthropic = Anthropic()
+        self.gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))  # Initialize genai.Client
 
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -39,70 +41,64 @@ class MCPClient:
         self.stdio, self.write = stdio_transport
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
         
-        await self.session.initialize()
+        await self.session.initialize() # type: ignore
         
         # List available tools
+        if not self.session:
+            raise RuntimeError("Client session is not initialized")
         response = await self.session.list_tools()
         tools = response.tools
         print("\nConnected to server with tools:", [tool.name for tool in tools])
 
     async def process_query(self, query: str) -> str:
-        """Process a query using Claude and available tools"""
-        messages = [
-            {
-                "role": "user",
-                "content": query
-            }
+        """Process a query using Gemini and available tools"""
+
+        # See this for reference.
+        # https://ai.google.dev/gemini-api/docs/function-calling?example=meeting
+        if not self.session:
+            raise RuntimeError("Client session is not initialized")
+
+        mcp_tools = await self.session.list_tools()
+        tools = [
+            types.Tool(
+                function_declarations=[
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": {
+                            k: v
+                            for k, v in tool.inputSchema.items()
+                            if k not in ["additionalProperties", "$schema"]
+                        },
+                    }
+                ]
+            )
+            for tool in mcp_tools.tools
         ]
 
-        response = await self.session.list_tools()
-        available_tools = [{ 
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.inputSchema
-        } for tool in response.tools]
+        config = types.GenerateContentConfig(tools=tools)
 
-        # Initial Claude API call
-        response = self.anthropic.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=1000,
-            messages=messages,
-            tools=available_tools
+        # Initial Gemini API call
+        gemini_response = self.gemini_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=query,
+            config=config
         )
 
-        # Process response and handle tool calls
         final_text = []
 
-        for content in response.content:
-            if content.type == 'text':
-                final_text.append(content.text)
-            elif content.type == 'tool_use':
-                tool_name = content.name
-                tool_args = content.input
-                
+        for part in gemini_response.candidates[0].content.parts:
+            if part.function_call:
+                function_call = part.function_call
+                tool_name = function_call.name
+                tool_args = function_call.args
+
                 # Execute tool call
                 result = await self.session.call_tool(tool_name, tool_args)
                 final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
-
-                # Continue conversation with tool results
-                if hasattr(content, 'text') and content.text:
-                    messages.append({
-                      "role": "assistant",
-                      "content": content.text
-                    })
-                messages.append({
-                    "role": "user", 
-                    "content": result.content
-                })
-
-                # Get next response from Claude
-                response = self.anthropic.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1000,
-                    messages=messages,
-                )
-
-                final_text.append(response.content[0].text)
+                final_text.append(f"[Tool result: {result.content}]")
+            else:
+                final_text.append(part.text)
 
         return "\n".join(final_text)
 
