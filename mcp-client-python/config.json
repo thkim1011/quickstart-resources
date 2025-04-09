@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+      "weather": {
+          "command": "uv",
+          "args": [
+              "--directory",
+              "/home/tkim/ws/quickstart-resources/hyperctl-server",
+              "run",
+              "main.py"
+          ]
+      }
+  }
+}
