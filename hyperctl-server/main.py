@@ -7,6 +7,26 @@ import subprocess
 mcp = FastMCP("hyprctl")
 
 @mcp.tool()
+async def move_window_to_workspace(pid: int, workspace_number: int) -> str:
+    """
+    Move the window specified by pid to the specified workspace.
+    Args:
+        pid: The PID of the window to move.
+        workspace_number: The workspace number to move the window to.
+    """
+    result = subprocess.run(
+        ["hyprctl", "-i", "0", "dispatch", "movetoworkspace", f"{workspace_number},pid:{pid}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout = result.stdout
+    stderr = result.stderr
+
+    if result.returncode != 0:
+        return f"Failed to move window. Logs: {stdout.strip()}. Error: {stderr.strip()}"
+    return f"Window moved!"
+
+@mcp.tool()
 async def get_windows() -> str:
     """
     Get the list of open windows. The output is a JSON array of objects containing the title, class (or program name), and workspace of each window.
@@ -21,7 +41,7 @@ async def get_windows() -> str:
 
     # Get a subset of the fields returned.
     windows = json.loads(stdout)
-    windows = [{ "title": window["title"], "class": window["class"], "workspace": window["workspace"] } for window in windows]
+    windows = [{ "title": window["title"], "class": window["class"], "workspace": window["workspace"], "pid": window["pid"] } for window in windows]
     
     return json.dumps(windows, indent=2)
 

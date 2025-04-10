@@ -20,6 +20,39 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         self.gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))  # Initialize genai.Client
+        self.mcp_tools = None
+        self.chat = None
+
+    async def initialize_chat(self):
+        if not self.session:
+            raise RuntimeError("Client session is not initialized")
+
+        self.mcp_tools = await self.session.list_tools()
+        tools = [
+            types.Tool(
+                function_declarations=[
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": {
+                            k: v
+                            for k, v in tool.inputSchema.items()
+                            if k not in ["additionalProperties", "$schema"]
+                        },
+                    }
+                ]
+            )
+            for tool in self.mcp_tools.tools
+        ]
+
+        config = types.GenerateContentConfig(tools=tools)
+
+        # Initial Gemini API call
+        self.chat = self.gemini_client.chats.create(
+            model="gemini-2.0-flash",
+            config=config
+        )
+
 
     async def connect_to_server(self, server_config_path: str):
         """Connect to an MCP server
@@ -51,36 +84,13 @@ class MCPClient:
         if not self.session:
             raise RuntimeError("Client session is not initialized")
 
-        mcp_tools = await self.session.list_tools()
-        tools = [
-            types.Tool(
-                function_declarations=[
-                    {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": {
-                            k: v
-                            for k, v in tool.inputSchema.items()
-                            if k not in ["additionalProperties", "$schema"]
-                        },
-                    }
-                ]
-            )
-            for tool in mcp_tools.tools
-        ]
+        if not self.chat:
+            await self.initialize_chat()
 
-        config = types.GenerateContentConfig(tools=tools)
-
-        # Initial Gemini API call
-        gemini_response = self.gemini_client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=query,
-            config=config
-        )
-
+        response = self.chat.send_message(query)
         final_text = []
 
-        for part in gemini_response.candidates[0].content.parts:
+        for part in response.candidates[0].content.parts:
             if part.function_call:
                 function_call = part.function_call
                 tool_name = function_call.name
@@ -90,6 +100,8 @@ class MCPClient:
                 result = await self.session.call_tool(tool_name, tool_args)
                 final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
                 final_text.append(f"[Tool result: {result.content}]")
+                response = self.chat.send_message(result.content[0].text)
+                final_text.append(response.text)
             else:
                 final_text.append(part.text)
 
