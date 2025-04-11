@@ -115,6 +115,8 @@ class MCPClient:
         while True:
             try:
                 query = input("\nQuery: ").strip()
+
+                print(query)
                 
                 if query.lower() == 'quit':
                     break

@@ -27,6 +27,27 @@ async def move_window_to_workspace(pid: int, workspace_number: int) -> str:
     return f"Window moved!"
 
 @mcp.tool()
+async def go_to_workspace(workspace_number: int) -> str:
+    """
+    Go to the specified workspace.
+    Args:
+        workspace_number: The workspace number to go to.
+    """
+    result = subprocess.run(
+        ["hyprctl", "-i", "0", "dispatch", "workspace", f"{workspace_number}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout = result.stdout
+    stderr = result.stderr
+
+    if result.returncode != 0:
+        return f"Failed to go to workspace. Logs: {stdout.strip()}. Error: {stderr.strip()}"
+    return f"Workspace switched!"
+
+
+
+@mcp.tool()
 async def get_windows() -> str:
     """
     Get the list of open windows. The output is a JSON array of objects containing the title, class (or program name), and workspace of each window.
